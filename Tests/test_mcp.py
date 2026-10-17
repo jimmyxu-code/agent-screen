@@ -28,11 +28,39 @@ class ProtocolTests(unittest.TestCase):
             {'jsonrpc': '2.0', 'id': 3, 'method': 'ping'},
         ])
         self.assertEqual(replies[0]['result']['protocolVersion'], '2025-11-25')
+        self.assertEqual(replies[0]['result']['serverInfo']['version'], '1.1.0')
         catalogue = replies[1]['result']['tools']
         self.assertEqual({tool['name'] for tool in catalogue},
                          {'agent_screen_prepare', 'agent_screen_status', 'agent_screen_move'})
         self.assertTrue(all(tool['inputSchema']['additionalProperties'] is False for tool in catalogue))
         self.assertEqual(replies[2]['result'], {})
+
+    def test_catalogue_has_no_obsolete_single_screen_route(self):
+        catalogue = self.exchange([{'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'}])[0]['result']['tools']
+        descriptions = {tool['name']: tool['description'] for tool in catalogue}
+        for name in ['agent_screen_prepare', 'agent_screen_status']:
+            self.assertIn('physical screen', descriptions[name])
+            self.assertNotIn('use SpaceO MCP instead', descriptions[name])
+        self.assertIn('no placement, SpaceO, isolation, or health check', descriptions['agent_screen_prepare'])
+        self.assertIn('controller', descriptions['agent_screen_move'])
+
+    def test_read_only_route_targets_a_connected_physical_screen(self):
+        reply = self.exchange([call('agent_screen_prepare', {})])[0]['result']
+        if reply.get('isError'):
+            message = reply['content'][0]['text']
+            if message in ['没有可用显示屏。', '显示屏处于镜像模式，请先改成扩展显示。']:
+                self.skipTest('Extended physical display unavailable on this runner')
+            self.fail(message)
+        route = json.loads(reply['content'][0]['text'])
+        screens = route['screens']
+        multiple = len(screens) > 1
+        target = screens[1 if multiple else 0]
+        self.assertEqual(route['mode'], 'second_physical_screen' if multiple else 'single_physical_screen')
+        self.assertEqual(route['target_display_id'], target['id'])
+        self.assertEqual(route['target_screen'], target['name'])
+        self.assertEqual(route['placement_required'], multiple)
+        self.assertNotIn('next_tool', route)
+        self.assertIn('instruction', route)
 
     def test_invalid_pid_is_rejected_before_accessibility_or_screen_queries(self):
         for value in [True, False, None, '12', 0, -1, 1.25, 2**31, 10**100]:

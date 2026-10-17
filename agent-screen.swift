@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-// Physical-screen window placement only. Single-screen work uses SpaceO.
+// Physical-screen window placement only. Single-screen work stays on that screen.
 struct ScreenError: Error, CustomStringConvertible {
     let description: String
     init(_ message: String) { description = message }
@@ -42,8 +42,7 @@ func screens() throws -> [NSScreen] {
 
 func destination() throws -> NSScreen {
     let connected = try screens()
-    guard connected.count > 1 else { throw ScreenError("单屏时请使用 SpaceO MCP 会话。") }
-    return connected[1]
+    return connected[connected.count > 1 ? 1 : 0]
 }
 
 func prepare() throws -> [String: Any] {
@@ -84,7 +83,11 @@ func status(pid: pid_t? = nil) throws -> [String: Any] {
     let connected = try screens()
     let target = connected[connected.count > 1 ? 1 : 0]
     var result: [String: Any] = [
-        "mode": connected.count > 1 ? "second_physical_screen" : "spaceo",
+        "mode": connected.count > 1 ? "second_physical_screen" : "single_physical_screen",
+        "placement_required": connected.count > 1,
+        "instruction": connected.count > 1
+            ? "只将当前任务的具体工作窗口放到第二块物理屏，再用电脑操作工具操作。控制端主界面留在用户主屏。"
+            : "直接用电脑操作工具在当前物理屏操作任务窗口；无需 SpaceO、额外屏幕隔离或健康检查。",
         "target_display_id": screenID(target),
         "target_screen": target.localizedName,
         "accessibility": AXIsProcessTrusted(),
@@ -93,11 +96,6 @@ func status(pid: pid_t? = nil) throws -> [String: Any] {
              "bounds": rectJSON(CGDisplayBounds(screenID(screen)))] as [String: Any]
         }
     ]
-    if connected.count == 1 {
-        result["target_display_id"] = NSNull()
-        result["target_screen"] = "SpaceO session"
-        result["next_tool"] = "spaceo_pool_status"
-    }
     if let pid {
         result["pid"] = pid
         result["windows"] = try windows(pid).enumerated().map { index, window in
@@ -118,7 +116,7 @@ func move(pid: pid_t, index: Int) throws -> [String: Any] {
     guard appWindows.indices.contains(index) else { throw ScreenError("窗口序号不存在，请重新读取 status(pid)。") }
     let window = appWindows[index]
     if (axAttribute(window, "AXFullScreen") as? Bool) == true {
-        throw ScreenError("请先退出目标窗口的全屏模式再放置到第二屏。")
+        throw ScreenError("请先退出目标窗口的全屏模式再放置到目标屏。")
     }
     if (axAttribute(window, kAXMinimizedAttribute) as? Bool) == true {
         throw ScreenError("请先恢复目标窗口再放置。")
@@ -158,10 +156,10 @@ func move(pid: pid_t, index: Int) throws -> [String: Any] {
 
 let emptySchema: [String: Any] = ["type": "object", "properties": [:], "additionalProperties": false]
 let tools: [[String: Any]] = [
-    ["name": "agent_screen_status", "description": "Read screens and app PIDs. With pid, list indexed windows. Multi-screen target is the second physical screen. With one physical screen, use SpaceO MCP instead.",
+    ["name": "agent_screen_status", "description": "Read physical screens and app PIDs. With pid, list indexed windows. Multi-screen target is the second physical screen. With one physical screen, operate task windows directly there using computer-use tools; no SpaceO session or health check is needed.",
      "inputSchema": ["type": "object", "properties": ["pid": ["type": "integer", "minimum": 1]], "additionalProperties": false]],
-    ["name": "agent_screen_prepare", "description": "Call BEFORE opening agent work windows. Choose the second physical screen on multi-screen setups. With one physical screen, use SpaceO MCP instead. On multi-screen setups open your work window, then call agent_screen_move. Never moves the pointer.", "inputSchema": emptySchema],
-    ["name": "agent_screen_move", "description": "Move one specified agent work window onto the target screen and verify its bounds. Get window_index from agent_screen_status(pid). Use normal computer-use tools to operate that window afterward.",
+    ["name": "agent_screen_prepare", "description": "Read the physical-screen route without changing windows or the pointer. On multiple physical screens, open a task window, then place it with agent_screen_move. On one physical screen, operate directly there; no placement, SpaceO, isolation, or health check is required. Keep controller main windows on the user's primary screen.", "inputSchema": emptySchema],
+    ["name": "agent_screen_move", "description": "Move only one specified task window onto the target physical screen and verify its bounds. Get window_index from agent_screen_status(pid). Only move a window opened for this task or explicitly designated by the user. Never sweep an app's windows or move a controller's normal main UI. Single-screen placement is optional. Use computer-use tools afterward.",
      "inputSchema": ["type": "object", "properties": ["pid": ["type": "integer", "minimum": 1], "window_index": ["type": "integer", "minimum": 0]], "required": ["pid", "window_index"], "additionalProperties": false]]
 ]
 
@@ -210,7 +208,7 @@ func processRequest(_ data: Data) {
         let requested = params["protocolVersion"] as? String ?? "2025-06-18"
         let supported = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
         response["result"] = ["protocolVersion": supported.contains(requested) ? requested : "2025-11-25",
-                              "capabilities": ["tools": [:]], "serverInfo": ["name": "agent-screen", "version": "1.0.0"]]
+                              "capabilities": ["tools": [:]], "serverInfo": ["name": "agent-screen", "version": "1.1.0"]]
     case "ping": response["result"] = [:] as [String: Any]
     case "tools/list": response["result"] = ["tools": tools]
     case "tools/call":

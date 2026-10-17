@@ -3,8 +3,8 @@
 [中文说明](README.zh-CN.md)
 
 A small macOS CLI and MCP server for placing agent work windows on a second physical display.
-On a single physical display, it reports `mode: spaceo` so the agent can use a separate
-[SpaceO](https://github.com/ParthJadhav/SpaceO) MCP session.
+On a single physical display, it reports `mode: single_physical_screen`: operate task windows
+directly on that screen with normal computer-use tools. SpaceO is not required.
 
 ## Install
 
@@ -38,8 +38,8 @@ path supported by your client:
 }
 ```
 
-Configure SpaceO separately for single-display work. This repository provides the routing
-signal and physical-window placement; SpaceO owns its virtual-display sessions and input routing.
+The tool reports the physical-screen route and places individual task windows. Your existing
+computer-use tools provide input on both single-display and multi-display setups.
 
 ## Workflow
 
@@ -47,11 +47,15 @@ signal and physical-window placement; SpaceO owns its virtual-display sessions a
 2. If `mode` is `second_physical_screen`, open the work app, call `agent_screen_status` with its
    `pid`, then call `agent_screen_move` with the returned `window_index`. Use your computer-use
    tool to drive that window. Place newly opened work windows the same way.
-3. If `mode` is `spaceo`, check SpaceO pool/doctor, create a healthy session, and verify placement
-   and isolation before driving an app. Preserve blocked/unknown and partial-isolation results.
+3. If `mode` is `single_physical_screen`, operate directly on that display. There is no required
+   placement step, SpaceO session, extra isolation, or health check.
+
+Only move specific task windows you opened or the user explicitly designated. Keep the normal
+WorkBuddy, Codex, DeepSeek Harness, and other controller interfaces on the user's primary screen.
+Never move all of an application's windows together.
 
 Physical displays are ordered with the main display first, then the remaining active displays
-by display ID. The target is the second entry. SpaceO's virtual displays are excluded. Mirrored
+by display ID. The target is the second entry when multiple physical displays are connected, otherwise the sole display. SpaceO's virtual displays are excluded. Mirrored
 setups are refused; use extended displays. Full-screen or minimized work windows must be restored
 before moving them. Window placement is confirmed from the resulting bounds.
 
@@ -73,10 +77,10 @@ git diff --check
 ```
 
 CI builds with warnings treated as errors and exercises MCP negotiation, argument validation,
-notification handling, bounded request framing, and invalid CLI input. These checks do not move
-windows or synthesize input. Actual multi-display placement requires a local extended-display
-setup and Accessibility permission. A real single-display SpaceO native workflow has been
-checked; keyboard/text routing remains partial where macOS does not expose focus evidence.
+notification handling, bounded request framing, invalid CLI input, tool routing instructions,
+and a read-only physical-screen route check. These checks do not move windows or synthesize
+input. Actual window operation requires local validation with the chosen computer-use tool;
+multi-display placement also requires an extended-display setup and Accessibility permission.
 
 This tool uses SpaceO's documented display vendor/model identifiers for filtering. SpaceO remains
 an independently installed project. Licensed under [MIT](LICENSE).
