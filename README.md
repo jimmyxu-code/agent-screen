@@ -69,6 +69,16 @@ agent-screen status PID
 agent-screen move PID WINDOW_INDEX
 ```
 
+## Window visibility
+
+If a computer-use tool can read or capture a task window but coordinate clicks report
+`noWindowsAvailable`, check whether that window is on the current macOS desktop. A controller
+in full-screen mode can occupy a separate desktop from the task app. Returning to the chat can
+switch back to that full-screen desktop, so manually focusing the task app before replying does
+not establish that its window remains visible. Use a normal controller window on the same
+desktop for coordinate-based work, or use the computer-use tool's supported accessibility actions.
+This does not require a SpaceO session or changes to privacy permissions.
+
 ## Development and verification
 
 ```sh
