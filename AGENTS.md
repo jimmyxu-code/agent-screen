@@ -1,15 +1,22 @@
 # Agent work location
 
-- Multiple physical displays: place the agent's work window on the second physical display.
-- Only move specific work windows opened for the current task or explicitly designated by the user.
-  Keep controller main interfaces and other existing user windows on the user's primary display.
-- One physical display: operate task windows directly on that display using computer-use tools.
-  No SpaceO session, extra isolation, health check, or screen-routing permission confirmation is needed.
+The user-facing rule is `skills/agent-screen/SKILL.md`. Read and follow it for GUI work; do not create client-specific copies.
 
-For multiple physical displays, call `agent_screen_prepare`, then `agent_screen_status(pid)` to discover the window index,
-then `agent_screen_move(pid, window_index)` before driving that window with a computer-use tool.
-Place new work windows the same way. CLI: `~/.local/bin/agent-screen`.
+- Browser work uses a supervised `agent-browser daemon` and isolated `managed_headless` contexts. Never open or adopt the user's browser, profile, cookies or tabs. `agent-browser show` is only for an explicit human request to watch; the local viewer is read-only until the user enables control. Browser input uses DevTools, never global input or the real pointer.
+- Call `agent-screen prepare` first. With one physical display, use a distinct session and tile on
+  the shared SpaceO virtual display via `agent-spaceo` instead of operating the user's desktop.
+  Use a supervised `agent-spaceo daemon`.
+- With multiple physical displays, the built-in panel is the agent screen. Use a supervised
+  `agent-screen watch` or a standard MCP-hosted engine; never detach into launchd or an ad-hoc daemon.
+- Claim an app before creating task windows and release afterwards. Park and restore only the user
+  window being borrowed. Pre-existing or unidentified windows belong to the user.
+- Keep controller main interfaces and unrelated user windows untouched.
+- Coordinate mouse work requires the visible independent cursor and an expected task PID. Never
+  warp, hide, borrow, or restore the real pointer, and never fall back to global HID mouse input.
+- SpaceO sessions use their native input and per-session cursor. Verify isolation and real UI
+  effects, and never treat a posted event or a partial report as full proof.
 
-Repository checks: `make test`, `git diff --check`. Tests must not move windows, synthesize input,
-change display topology, or alter privacy permissions. Keep machine-specific configuration,
-diagnostic logs, recordings, and credentials outside this repository.
+Repository checks: `make test` and `git diff --check`. Tests must not move real windows, host the
+engine, show the cursor, synthesize input, change display topology, or alter privacy permissions.
+Keep machine-specific configuration, diagnostic logs, recordings, and credentials outside this
+repository. Real window and cursor verification uses disposable fixtures outside tracked files.

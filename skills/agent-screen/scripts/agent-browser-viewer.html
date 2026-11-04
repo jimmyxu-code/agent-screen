@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>智能体浏览器 · 隔离观察</title>
+<style>
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+body { margin: 0; background: #111418; color: #e8edf3; }
+header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; background: #1d232b; }
+header strong { font-size: 16px; }
+#status { color: #8fc7ff; font-size: 13px; }
+.toolbar { display: grid; gap: 5px; padding: 12px 20px; border-bottom: 1px solid #303a46; }
+#title { font-size: 14px; }
+#url { color: #9ca9b9; font: 12px ui-monospace, monospace; overflow-wrap: anywhere; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 20px; font-size: 13px; }
+.controls input[type=checkbox] { width: 17px; height: 17px; }
+#compose { flex: 1 1 280px; min-width: 180px; padding: 8px; border: 1px solid #475568; border-radius: 5px; background: #202832; color: #e8edf3; }
+#compose:disabled { opacity: .45; }
+button { padding: 8px 14px; border: 0; border-radius: 5px; background: #3276b9; color: white; }
+button:disabled { opacity: .45; }
+#stage { padding: 16px; overflow: auto; text-align: center; }
+#frame { display: block; max-width: 100%; height: auto; margin: auto; background: #202020; box-shadow: 0 0 0 1px #48515c; outline-offset: 4px; }
+#hint { padding: 0 20px 18px; color: #9ca9b9; font-size: 12px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<header><strong>智能体浏览器 · 隔离观察</strong><span id="status">连接中…</span></header>
+<div class="toolbar"><span id="title"></span><span id="url"></span></div>
+<div class="controls">
+  <label><input id="control" type="checkbox">允许我控制此隔离浏览器</label>
+  <input id="compose" disabled placeholder="输入文本后回车，只发送到隔离浏览器" aria-label="发送到隔离浏览器的文本">
+  <button id="send" disabled>发送文本</button>
+</div>
+<main id="stage"><img id="frame" tabindex="0" alt="隔离浏览器实时画面"></main>
+<p id="hint">默认只读，不影响你当前的应用和鼠标。勾选控制后，点击画面、滚动和键盘输入才会进入隔离页面。蓝色箭头是智能体的独立指针。密码等敏感文本不会写入观察页日志。</p>
+<script>
+'use strict';
+const session = new URLSearchParams(location.search).get('session') || '';
+const frame = document.getElementById('frame');
+const status = document.getElementById('status');
+const control = document.getElementById('control');
+const compose = document.getElementById('compose');
+const send = document.getElementById('send');
+let refreshing = false;
+let pending = Promise.resolve();
+let lastFrame = '';
+let lastPointerMove = 0;
+
+function report(text) { status.textContent = text; }
+
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    const response = await fetch('/api/state?session=' + encodeURIComponent(session), {cache: 'no-store'});
+    const data = await response.json();
+    if (!response.ok) throw new Error('unavailable');
+    document.getElementById('title').textContent = data.title || '隔离页面';
+    document.getElementById('url').textContent = data.url || '';
+    if (data.png !== lastFrame) {
+      const next = new Image();
+      next.onload = () => { frame.src = next.src; };
+      next.src = 'data:image/png;base64,' + data.png;
+      lastFrame = data.png;
+    }
+    report(control.checked ? '实时 · 你已允许控制' : '实时 · 只读');
+  } catch (_) {
+    report('连接失败或会话已结束');
+  } finally {
+    refreshing = false;
+  }
+}
+
+function post(action) {
+  pending = pending.then(async () => {
+    const response = await fetch('/api/input?session=' + encodeURIComponent(session), {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(action),
+    });
+    if (!response.ok) throw new Error('input rejected');
+    report('已发送到隔离浏览器');
+  }).catch(() => report('操作未被接受；请重新读取页面'));
+  return pending;
+}
+
+control.addEventListener('change', () => {
+  compose.disabled = !control.checked;
+  send.disabled = !control.checked;
+  if (control.checked) frame.focus();
+  else compose.blur();
+  refresh();
+});
+
+function point(event) {
+  const rect = frame.getBoundingClientRect();
+  if (!frame.naturalWidth || !rect.width || !rect.height) return null;
+  return {x: (event.clientX - rect.left) * frame.naturalWidth / rect.width,
+          y: (event.clientY - rect.top) * frame.naturalHeight / rect.height};
+}
+
+frame.addEventListener('click', event => {
+  if (!control.checked) return;
+  const p = point(event);
+  if (p) post({kind: 'click', x: p.x, y: p.y});
+});
+frame.addEventListener('mousemove', event => {
+  if (!control.checked || Date.now() - lastPointerMove < 80) return;
+  lastPointerMove = Date.now();
+  const p = point(event);
+  if (p) post({kind: 'move', x: p.x, y: p.y});
+});
+frame.addEventListener('wheel', event => {
+  if (!control.checked) return;
+  event.preventDefault();
+  post({kind: 'scroll', dx: event.deltaX, dy: event.deltaY});
+}, {passive: false});
+frame.addEventListener('keydown', event => {
+  if (!control.checked || event.isComposing) return;
+  if ((event.metaKey || event.ctrlKey) && ['c', 'x', 'v'].includes(event.key.toLowerCase())) {
+    event.preventDefault();
+    report('不读取或修改系统剪贴板，请直接输入文本');
+    return;
+  }
+  if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    post({kind: 'type', text: event.key});
+    return;
+  }
+  if (['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(event.key)) {
+    event.preventDefault();
+    post({kind: 'key', key: event.key});
+  }
+});
+
+function sendText() {
+  if (!control.checked || !compose.value) return;
+  const text = compose.value;
+  compose.value = '';
+  post({kind: 'type', text}).then(() => frame.focus());
+}
+send.addEventListener('click', sendText);
+compose.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); sendText(); }
+});
+setInterval(refresh, 750);
+refresh();
+</script>
+</body>
+</html>
